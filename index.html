@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cronômetro de Speedcubing (cstimer Replica)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap');
+        :root {
+            --primary-color: #007bff; /* Azul clássico */
+            --bg-color: #f7f7f7; /* Fundo claro */
+            --header-footer-bg: #e9ecef; /* Cinza claro */
+            --text-color: #343a40; /* Texto escuro */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden; /* Prevent body scroll */
+            transition: background-color 0.3s;
+        }
+        .timer-display {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 8rem;
+            font-weight: 700;
+            transition: color 0.1s;
+            cursor: pointer;
+        }
+        @media (max-width: 768px) {
+            .timer-display {
+                font-size: 4.5rem;
+            }
+        }
+        /* Cores de status ajustadas para fundo claro */
+        .timer-status-ready {
+            color: #dc3545; /* Vermelho/Laranja para 'Pronto' */
+        }
+        .timer-status-timing {
+            color: #28a745; /* Verde para 'Cronometrando' */
+        }
+        .scramble-box {
+            min-height: 80px;
+        }
+        .scramble-moves {
+            font-family: 'Roboto Mono', monospace;
+            word-wrap: break-word;
+        }
+        .solve-time-entry {
+            transition: background-color 0.1s;
+        }
+        .solve-time-entry:hover {
+            background-color: #dee2e6; /* Cinza claro ao passar o mouse */
+        }
+        /* Estilo da lista de soluções para parecer mais clássico */
+        #solves-list {
+            border: 1px solid #ced4da;
+        }
+        .stat-box {
+            border: 1px solid #ced4da;
+            background-color: #ffffff;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen antialiased">
+
+    <!-- Header and Scramble Display -->
+    <div class="p-4 md:p-6 bg-[var(--header-footer-bg)] shadow-md flex flex-col justify-center items-center">
+        <div id="user-info" class="text-xs text-gray-500 mb-2 w-full max-w-5xl text-left">
+            <!-- User ID will be inserted here -->
+        </div>
+        <div class="scramble-box w-full max-w-5xl bg-white p-3 rounded-lg flex flex-col justify-center items-center mb-4 border border-gray-300">
+            <h2 class="text-sm font-semibold text-gray-600 mb-1">Embaralhamento (3x3x3)</h2>
+            <div id="scramble-display" class="scramble-moves text-lg md:text-xl text-gray-800 text-center select-all">
+                Gerando...
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Timer Area -->
+    <main id="timer-area" class="flex-grow flex flex-col items-center justify-center p-4">
+        <div id="timer-display" class="timer-display text-[var(--text-color)] select-none">
+            0.000
+        </div>
+        <p id="timer-message" class="text-sm md:text-base text-gray-500 mt-2">Mantenha a barra de espaço pressionada para iniciar</p>
+    </main>
+
+    <!-- Statistics and Solves -->
+    <div class="bg-[var(--header-footer-bg)] p-4 md:p-6 shadow-inner flex-shrink-0">
+        <div class="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-center">
+            <div class="stat-box p-2 rounded-lg">
+                <p class="text-xs text-gray-500">Melhor Tempo</p>
+                <p id="stat-best" class="text-xl font-bold text-teal-600">--</p>
+            </div>
+            <div class="stat-box p-2 rounded-lg">
+                <p class="text-xs text-gray-500">Média de 5 (M5)</p>
+                <p id="stat-ao5" class="text-xl font-bold text-blue-600">--</p>
+            </div>
+            <div class="stat-box p-2 rounded-lg col-span-2">
+                <p class="text-xs text-gray-500">Número Total de Soluções</p>
+                <p id="stat-total" class="text-xl font-bold text-purple-600">0</p>
+            </div>
+        </div>
+
+        <h3 class="text-lg font-semibold text-[var(--text-color)] mb-3 border-b border-gray-300 pb-1 max-w-5xl mx-auto">Histórico de Soluções</h3>
+        <div id="solves-list" class="max-w-5xl mx-auto h-32 overflow-y-auto bg-white rounded-lg p-2">
+            <p class="text-gray-500 text-sm text-center">Nenhum tempo registrado ainda. Comece a cronometrar!</p>
+        </div>
+        <div id="loading-indicator" class="text-center mt-4 text-orange-600 hidden">Carregando tempos...</div>
+    </div>
+
+    <!-- Audio element for TTS playback -->
+    <audio id="tts-audio" style="display: none;"></audio>
+
+    <!-- Firebase and Timer Logic -->
+    <script type="module">
+        // Importa módulos do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configurações do Firebase (globais fornecidas pelo ambiente)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Variáveis de Estado
+        let app, db, auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Variáveis do Cronômetro
+        const STATUS = {
+            STOPPED: 'STOPPED',
+            READY_TO_START: 'READY_TO_START',
+            TIMING: 'TIMING'
+        };
+        let currentState = STATUS.STOPPED;
+        let startTime = 0;
+        let timerInterval = null;
+        let holdTimeout = null;
+        let isSpaceDown = false;
+        const HOLD_TIME_MS = 300; // Tempo de espera para 'pronto'
+
+        // Elementos DOM
+        const timerDisplay = document.getElementById('timer-display');
+        const timerArea = document.getElementById('timer-area');
+        const timerMessage = document.getElementById('timer-message');
+        const scrambleDisplay = document.getElementById('scramble-display');
+        const solvesList = document.getElementById('solves-list');
+        const userInfo = document.getElementById('user-info');
+        const statBest = document.getElementById('stat-best');
+        const statAo5 = document.getElementById('stat-ao5');
+        const statTotal = document.getElementById('stat-total');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const ttsAudio = document.getElementById('tts-audio');
+
+        // --- Funções Auxiliares de Áudio TTS ---
+
+        /** Converte string base64 em ArrayBuffer */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /** Cria um cabeçalho WAV a partir dos dados PCM e taxa de amostragem */
+        function writeString(view, offset, str) {
+            for (let i = 0; i < str.length; i++) {
+                view.setUint8(offset + i, str.charCodeAt(i));
+            }
+        }
+
+        /** Converte dados PCM brutos em um Blob WAV */
+        function pcmToWav(pcm16, sampleRate) {
+            const numChannels = 1;
+            const bytesPerSample = 2; // Int16
+            const blockAlign = numChannels * bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = pcm16.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            // RIFF chunk
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(view, 8, 'WAVE');
+
+            // fmt chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // Audio format (1 for PCM)
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, 16, true); // Bits per sample
+
+            // data chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            // Write PCM data
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        /**
+         * Chama a API TTS para converter texto em fala e reproduz o áudio.
+         * Implementa Exponential Backoff para lidar com falhas de rede.
+         * @param {string} text - O texto a ser falado.
+         */
+        async function speakTime(text) {
+            const payload = {
+                contents: [{
+                    parts: [{ text: text }]
+                }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: "Puck" } // Voz Upbeat
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+            const MAX_RETRIES = 3;
+            let currentRetry = 0;
+
+            while (currentRetry < MAX_RETRIES) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        // Se for um erro de autenticação/permissão, não vale a pena tentar novamente.
+                        if (response.status === 401 || response.status === 403) {
+                            console.error(`TTS API retornou erro de status: ${response.status}. Chave de API ou problema de permissões. Retentar não ajudará.`);
+                            currentRetry = MAX_RETRIES;
+                            break;
+                        }
+
+                        // Para outros erros (ex: 500, 429), tenta retentar
+                        console.warn(`TTS API retornou erro de status: ${response.status}. Retentando... (${currentRetry + 1}/${MAX_RETRIES})`);
+                        currentRetry++;
+                        // Implementa o atraso de backoff exponencial
+                        const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; // Recomeça o loop
+                    }
+
+                    const result = await response.json();
+                    const part = result?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+
+                    if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
+                        // Extrai a taxa de amostragem
+                        const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                        if (!sampleRateMatch) throw new Error("Não foi possível analisar a taxa de amostragem do mimeType.");
+                        const sampleRate = parseInt(sampleRateMatch[1], 10);
+
+                        const pcmData = base64ToArrayBuffer(audioData);
+                        const pcm16 = new Int16Array(pcmData);
+
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+
+                        ttsAudio.src = audioUrl;
+                        ttsAudio.play();
+                        return; // Sucesso, sai da função
+                    } else {
+                        console.error("Dados de áudio TTS ausentes ou formato inesperado.", result);
+                        return; // Falha, sai da função
+                    }
+
+                } catch (error) {
+                    console.error("Erro ao chamar a API TTS:", error);
+                    currentRetry++;
+                    if (currentRetry >= MAX_RETRIES) {
+                        console.error("Falha persistente na chamada à API TTS após retentativas.");
+                        return;
+                    }
+                    // Implementa o atraso de backoff exponencial
+                    const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            console.error("A chamada à API TTS falhou após todas as retentativas.");
+        }
+
+
+        // --- Funções do Cronômetro ---
+
+        /** Formata o tempo em milissegundos para string MM:SS.mmm */
+        function formatTime(ms) {
+            const minutes = Math.floor(ms / 60000);
+            const seconds = Math.floor((ms % 60000) / 1000);
+            const milliseconds = ms % 1000;
+
+            const minStr = minutes > 0 ? `${minutes}:` : '';
+            const secStr = seconds.toString().padStart(minutes > 0 ? 2 : 1, '0');
+            const msStr = milliseconds.toString().padStart(3, '0');
+
+            return `${minStr}${secStr}.${msStr}`;
+        }
+
+        /** Atualiza o display do cronômetro */
+        function updateTimerDisplay() {
+            if (currentState === STATUS.TIMING) {
+                const currentTime = Date.now();
+                const elapsed = currentTime - startTime;
+                timerDisplay.textContent = formatTime(elapsed);
+            }
+        }
+
+        /** Inicia o cronômetro */
+        function startTiming() {
+            if (currentState !== STATUS.TIMING) {
+                currentState = STATUS.TIMING;
+                startTime = Date.now();
+                timerInterval = setInterval(updateTimerDisplay, 10);
+                timerArea.classList.remove('timer-status-ready');
+                timerArea.classList.add('timer-status-timing');
+                timerMessage.textContent = 'Tempo a decorrer...';
+            }
+        }
+
+        /** Para o cronômetro e regista o tempo */
+        function stopTiming() {
+            if (currentState === STATUS.TIMING) {
+                clearInterval(timerInterval);
+                const finalTime = Date.now() - startTime;
+                currentState = STATUS.STOPPED;
+                timerArea.classList.remove('timer-status-timing');
+                timerArea.classList.remove('timer-status-ready'); // Clean up any lingering ready state
+                timerDisplay.classList.remove('text-red-500'); // Remove red from timer
+                timerDisplay.classList.add('text-gray-800'); // Default color
+
+                // Salva o tempo no Firestore e gera novo embaralhamento
+                saveSolveTime(finalTime);
+                generateScramble();
+                timerMessage.textContent = 'Mantenha a barra de espaço pressionada para iniciar';
+
+                // Fala o tempo final
+                const seconds = (finalTime / 1000).toFixed(2);
+                speakTime(`O seu tempo foi de ${seconds} segundos.`);
+            }
+        }
+
+        // --- Lógica de Geração de Embaralhamento (3x3x3) ---
+        const MOVES = ['R', 'L', 'U', 'D', 'F', 'B'];
+        const MODIFIERS = ['', '2', "'"];
+        const SCRAMBLE_LENGTH = 20;
+
+        function generateScramble() {
+            let scramble = [];
+            let lastMove = '';
+            let lastAxis = '';
+
+            for (let i = 0; i < SCRAMBLE_LENGTH; i++) {
+                let move, moveAxis;
+                do {
+                    move = MOVES[Math.floor(Math.random() * MOVES.length)];
+                    moveAxis = move[0] === 'R' || move[0] === 'L' ? 'x' :
+                               move[0] === 'U' || move[0] === 'D' ? 'y' : 'z';
+                } while (move === lastMove || moveAxis === lastAxis);
+
+                const modifier = MODIFIERS[Math.floor(Math.random() * MODIFIERS.length)];
+                scramble.push(move + modifier);
+
+                lastMove = move;
+                lastAxis = moveAxis;
+            }
+            scrambleDisplay.textContent = scramble.join(' ');
+        }
+
+
+        // --- Lógica de Eventos de Teclado (Barra de Espaço) ---
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !isSpaceDown) {
+                e.preventDefault(); // Previne a rolagem
+                isSpaceDown = true;
+
+                if (currentState === STATUS.STOPPED) {
+                    // Começa a contagem para o estado READY_TO_START
+                    timerDisplay.classList.add('text-gray-500'); // Cor de espera suave
+                    holdTimeout = setTimeout(() => {
+                        currentState = STATUS.READY_TO_START;
+                        timerDisplay.classList.remove('text-gray-500');
+                        timerArea.classList.add('timer-status-ready'); // Cor de pronto (vermelho)
+                        timerMessage.textContent = 'Solte a barra de espaço para cronometrar!';
+                    }, HOLD_TIME_MS);
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') {
+                isSpaceDown = false;
+
+                if (currentState === STATUS.READY_TO_START) {
+                    // Soltou depois do hold: Inicia o cronômetro
+                    clearTimeout(holdTimeout);
+                    startTiming();
+                } else if (currentState === STATUS.TIMING) {
+                    // Soltou durante a cronometragem: Para o cronômetro
+                    stopTiming();
+                } else if (currentState === STATUS.STOPPED) {
+                    // Soltou sem hold ou após uma paragem: Limpa o timeout de hold (caso tenha sido rápido)
+                    clearTimeout(holdTimeout);
+                    timerDisplay.classList.remove('text-gray-500');
+                }
+            }
+        });
+
+        // --- Lógica do Firebase Firestore ---
+
+        function getCollectionPath(uid) {
+            // Caminho privado: /artifacts/{appId}/users/{userId}/solves
+            return `artifacts/${appId}/users/${uid}/solves`;
+        }
+
+        /** Inicializa o Firebase e autentica o utilizador */
+        async function initFirebase() {
+            if (!firebaseConfig.apiKey) {
+                console.error("Firebase config is missing. Data persistence disabled.");
+                userInfo.textContent = "Erro: Configuração do Firebase ausente. Tempos não serão salvos.";
+                isAuthReady = true;
+                return;
+            }
+
+            try {
+                setLogLevel('error'); // Reduz a verbosidade do log do Firestore
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Tenta autenticação com token ou anónima
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userInfo.textContent = `ID do Utilizador Atual: ${userId}`;
+                        isAuthReady = true;
+                        loadingIndicator.classList.add('hidden');
+                        setupSolvesListener();
+                    } else {
+                        userId = null;
+                        isAuthReady = true;
+                        loadingIndicator.classList.add('hidden');
+                    }
+                });
+
+                loadingIndicator.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Erro na inicialização do Firebase ou autenticação:", error);
+                userInfo.textContent = `Erro de autenticação: ${error.message}`;
+                isAuthReady = true;
+            }
+        }
+
+        /** Salva um tempo de solução no Firestore */
+        async function saveSolveTime(timeMs) {
+            if (!isAuthReady || !userId || !db) return console.warn("Firebase não está pronto para salvar.");
+
+            try {
+                const docRef = await addDoc(collection(db, getCollectionPath(userId)), {
+                    time: timeMs,
+                    scramble: scrambleDisplay.textContent,
+                    timestamp: serverTimestamp()
+                });
+                console.log("Tempo salvo com ID:", docRef.id);
+            } catch (e) {
+                console.error("Erro ao adicionar documento:", e);
+            }
+        }
+
+        /** Configura o listener de tempo real para as soluções */
+        function setupSolvesListener() {
+            if (!isAuthReady || !userId || !db) return;
+
+            const solvesRef = collection(db, getCollectionPath(userId));
+            const q = query(solvesRef); // Pode adicionar orderBy, mas evitamos para não exigir índice
+
+            onSnapshot(q, (snapshot) => {
+                let solves = [];
+                snapshot.forEach((doc) => {
+                    solves.push({ id: doc.id, ...doc.data() });
+                });
+                // Ordena localmente por timestamp decrescente
+                solves.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
+
+                updateUIWithSolves(solves);
+            }, (error) => {
+                console.error("Erro ao ouvir soluções:", error);
+            });
+        }
+
+        /** Remove uma solução pelo ID */
+        async function deleteSolve(id) {
+            if (!isAuthReady || !userId || !db) return;
+
+            // Usa prompt personalizado para evitar o alert/confirm do navegador
+            const userConfirmed = window.prompt("Confirme a exclusão do tempo (digite 'deletar'):");
+            if (userConfirmed !== 'deletar') return;
+
+            try {
+                await deleteDoc(doc(db, getCollectionPath(userId), id));
+                console.log("Documento excluído com sucesso:", id);
+            } catch (e) {
+                console.error("Erro ao excluir documento:", e);
+            }
+        }
+
+        // --- Lógica de Estatísticas e Atualização da UI ---
+
+        function calculateStats(solves) {
+            const times = solves.map(s => s.time).filter(t => typeof t === 'number');
+
+            if (times.length === 0) {
+                return { best: '--', ao5: '--', total: 0 };
+            }
+
+            // Melhor Tempo
+            const bestTime = Math.min(...times);
+
+            // Média de 5 (Ao5) - usa as últimas 5 soluções
+            let ao5 = '--';
+            const lastFive = times.slice(0, 5); // Como estão ordenados por tempo, pegamos os 5 primeiros
+            if (lastFive.length === 5) {
+                // Remove o melhor e o pior, calcula a média dos 3 restantes
+                const sortedFive = [...lastFive].sort((a, b) => a - b);
+                const sum = sortedFive.slice(1, 4).reduce((acc, val) => acc + val, 0);
+                ao5 = formatTime(Math.round(sum / 3));
+            }
+
+            return {
+                best: formatTime(bestTime),
+                ao5: ao5,
+                total: times.length
+            };
+        }
+
+        function updateUIWithSolves(solves) {
+            const stats = calculateStats(solves);
+
+            statBest.textContent = stats.best;
+            statAo5.textContent = stats.ao5;
+            statTotal.textContent = stats.total;
+
+            solvesList.innerHTML = '';
+
+            if (solves.length === 0) {
+                solvesList.innerHTML = '<p class="text-gray-500 text-sm text-center p-2">Nenhum tempo registado ainda. Comece a cronometrar!</p>';
+                return;
+            }
+
+            solves.forEach((solve, index) => {
+                const solveEl = document.createElement('div');
+                solveEl.className = 'solve-time-entry flex justify-between items-center text-sm p-1 rounded hover:bg-gray-700/50';
+                solveEl.innerHTML = `
+                    <span class="font-bold text-lg text-green-600 w-1/4">${formatTime(solve.time)}</span>
+                    <span class="text-xs text-gray-600 truncate w-2/4 text-right">${solve.scramble.substring(0, 25)}...</span>
+                    <button data-id="${solve.id}" class="delete-btn text-red-600 hover:text-red-400 ml-4 p-1 rounded text-xs font-semibold">Excluir</button>
+                `;
+                solvesList.appendChild(solveEl);
+            });
+
+            // Adiciona listener para exclusão
+            solvesList.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const id = e.currentTarget.getAttribute('data-id');
+                    deleteSolve(id);
+                });
+            });
+        }
+
+
+        // --- Inicialização ---
+
+        window.onload = () => {
+            initFirebase();
+            generateScramble();
+            timerDisplay.textContent = '0.000'; // Define o estado inicial do display
+        };
+
+    </script>
+</body>
+</html>
