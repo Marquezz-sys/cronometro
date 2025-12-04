@@ -3,21 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cronômetro de Speedcubing (cstimer Replica)</title>
+    <title>Cronômetro e Visualizador 3D de Cubo</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inclui a biblioteca Three.js para renderização 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap');
         :root {
-            --primary-color: #007bff; /* Azul clássico */
-            --bg-color: #f7f7f7; /* Fundo claro */
-            --header-footer-bg: #e9ecef; /* Cinza claro */
-            --text-color: #343a40; /* Texto escuro */
+            --primary-color: #007bff;
+            --bg-color: #f7f7f7;
+            --header-footer-bg: #e9ecef;
+            --text-color: #343a40;
         }
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
-            overflow: hidden; /* Prevent body scroll */
+            overflow: hidden;
             transition: background-color 0.3s;
         }
         .timer-display {
@@ -34,10 +36,10 @@
         }
         /* Cores de status ajustadas para fundo claro */
         .timer-status-ready {
-            color: #dc3545; /* Vermelho/Laranja para 'Pronto' */
+            color: #dc3545;
         }
         .timer-status-timing {
-            color: #28a745; /* Verde para 'Cronometrando' */
+            color: #28a745;
         }
         .scramble-box {
             min-height: 80px;
@@ -46,13 +48,6 @@
             font-family: 'Roboto Mono', monospace;
             word-wrap: break-word;
         }
-        .solve-time-entry {
-            transition: background-color 0.1s;
-        }
-        .solve-time-entry:hover {
-            background-color: #dee2e6; /* Cinza claro ao passar o mouse */
-        }
-        /* Estilo da lista de soluções para parecer mais clássico */
         #solves-list {
             border: 1px solid #ced4da;
         }
@@ -60,13 +55,49 @@
             border: 1px solid #ced4da;
             background-color: #ffffff;
         }
+        /* Estilo para o container 3D */
+        #cube-view {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #222;
+        }
+        canvas {
+            display: block;
+        }
+
+        /* --- Estilos de Transição --- */
+        .view-transition {
+            /* Aplica a transição para opacidade e movimento Y */
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+            will-change: opacity, transform; /* Otimização de performance */
+        }
+
+        /* Classe de saída: Desaparece e move-se ligeiramente para baixo */
+        .fade-out {
+            opacity: 0 !important;
+            transform: translateY(10px) !important;
+        }
+
+        /* Classe de entrada/estado padrão: Totalmente visível e na posição original */
+        .fade-in {
+            opacity: 1 !important;
+            transform: translateY(0) !important;
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen antialiased">
 
     <!-- Header and Scramble Display -->
-    <div class="p-4 md:p-6 bg-[var(--header-footer-bg)] shadow-md flex flex-col justify-center items-center">
-        <div id="user-info" class="text-xs text-gray-500 mb-2 w-full max-w-5xl text-left">
+    <div class="p-4 md:p-6 bg-[var(--header-footer-bg)] shadow-md flex flex-col justify-center items-center relative">
+        <!-- Botão de Alternar Vista (Canto Superior Esquerdo) -->
+        <button id="toggle-view-btn" class="absolute top-3 left-3 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-3 rounded-lg text-sm transition duration-150 shadow-md">
+            Cubo 3D
+        </button>
+
+        <div id="user-info" class="text-xs text-gray-500 mb-2 w-full max-w-5xl text-left mt-10 md:mt-0">
             <!-- User ID will be inserted here -->
         </div>
         <div class="scramble-box w-full max-w-5xl bg-white p-3 rounded-lg flex flex-col justify-center items-center mb-4 border border-gray-300">
@@ -77,37 +108,51 @@
         </div>
     </div>
 
-    <!-- Main Timer Area -->
-    <main id="timer-area" class="flex-grow flex flex-col items-center justify-center p-4">
-        <div id="timer-display" class="timer-display text-[var(--text-color)] select-none">
-            0.000
-        </div>
-        <p id="timer-message" class="text-sm md:text-base text-gray-500 mt-2">Mantenha a barra de espaço pressionada para iniciar</p>
-    </main>
+    <!-- Main Content Area - Alterna entre Cronômetro e 3D -->
+    <div class="flex-grow flex flex-col items-center justify-center p-4 overflow-hidden">
 
-    <!-- Statistics and Solves -->
-    <div class="bg-[var(--header-footer-bg)] p-4 md:p-6 shadow-inner flex-shrink-0">
-        <div class="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-center">
-            <div class="stat-box p-2 rounded-lg">
-                <p class="text-xs text-gray-500">Melhor Tempo</p>
-                <p id="stat-best" class="text-xl font-bold text-teal-600">--</p>
+        <!-- Vista do Cronômetro -->
+        <div id="timer-main" class="w-full h-full flex flex-col items-center view-transition fade-in">
+            <!-- Esta área cresce para centralizar o display do cronômetro verticalmente -->
+            <div id="timer-area" class="w-full flex-grow flex flex-col justify-center items-center">
+                <div id="timer-display" class="timer-display text-[var(--text-color)] select-none">
+                    0.000
+                </div>
+                <p id="timer-message" class="text-sm md:text-base text-gray-500 mt-2">Mantenha a barra de espaço pressionada para iniciar</p>
             </div>
-            <div class="stat-box p-2 rounded-lg">
-                <p class="text-xs text-gray-500">Média de 5 (M5)</p>
-                <p id="stat-ao5" class="text-xl font-bold text-blue-600">--</p>
-            </div>
-            <div class="stat-box p-2 rounded-lg col-span-2">
-                <p class="text-xs text-gray-500">Número Total de Soluções</p>
-                <p id="stat-total" class="text-xl font-bold text-purple-600">0</p>
+
+            <!-- Statistics and Solves -->
+            <div class="w-full max-w-5xl mt-6">
+                 <div class="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-center">
+                    <div class="stat-box p-2 rounded-lg">
+                        <p class="text-xs text-gray-500">Melhor Tempo</p>
+                        <p id="stat-best" class="text-xl font-bold text-teal-600">--</p>
+                    </div>
+                    <div class="stat-box p-2 rounded-lg">
+                        <p class="text-xs text-gray-500">Média de 5 (M5)</p>
+                        <p id="stat-ao5" class="text-xl font-bold text-blue-600">--</p>
+                    </div>
+                    <div class="stat-box p-2 rounded-lg col-span-2">
+                        <p class="text-xs text-gray-500">Número Total de Soluções</p>
+                        <p id="stat-total" class="text-xl font-bold text-purple-600">0</p>
+                    </div>
+                </div>
+
+                <h3 class="text-lg font-semibold text-[var(--text-color)] mb-3 border-b border-gray-300 pb-1 max-w-5xl mx-auto">Histórico de Soluções</h3>
+                <div id="solves-list" class="max-w-5xl mx-auto h-32 overflow-y-auto bg-white rounded-lg p-2">
+                    <p class="text-gray-500 text-sm text-center">Nenhum tempo registrado ainda. Comece a cronometrar!</p>
+                </div>
+                <div id="loading-indicator" class="text-center mt-4 text-orange-600 hidden">Carregando tempos...</div>
             </div>
         </div>
 
-        <h3 class="text-lg font-semibold text-[var(--text-color)] mb-3 border-b border-gray-300 pb-1 max-w-5xl mx-auto">Histórico de Soluções</h3>
-        <div id="solves-list" class="max-w-5xl mx-auto h-32 overflow-y-auto bg-white rounded-lg p-2">
-            <p class="text-gray-500 text-sm text-center">Nenhum tempo registrado ainda. Comece a cronometrar!</p>
+        <!-- Vista 3D do Cubo (Inicialmente oculta e com classes de transição) -->
+        <div id="cube-view" class="hidden view-transition fade-out">
+            <!-- Three.js Canvas será inserido aqui -->
+            <div id="cube-canvas-container" class="w-full h-full max-w-lg max-h-lg"></div>
         </div>
-        <div id="loading-indicator" class="text-center mt-4 text-orange-600 hidden">Carregando tempos...</div>
     </div>
+
 
     <!-- Audio element for TTS playback -->
     <audio id="tts-audio" style="display: none;"></audio>
@@ -144,6 +189,9 @@
         const HOLD_TIME_MS = 300; // Tempo de espera para 'pronto'
 
         // Elementos DOM
+        const timerMain = document.getElementById('timer-main');
+        const cubeView = document.getElementById('cube-view');
+        const toggleViewBtn = document.getElementById('toggle-view-btn');
         const timerDisplay = document.getElementById('timer-display');
         const timerArea = document.getElementById('timer-area');
         const timerMessage = document.getElementById('timer-message');
@@ -155,6 +203,221 @@
         const statTotal = document.getElementById('stat-total');
         const loadingIndicator = document.getElementById('loading-indicator');
         const ttsAudio = document.getElementById('tts-audio');
+        const cubeCanvasContainer = document.getElementById('cube-canvas-container');
+
+        // Estado da Vista
+        let is3DView = false;
+        let currentScramble = '';
+        let cubeManager = null; // Instância do gestor 3D
+
+        // --- Gestor 3D do Cubo ---
+        class Cube3DManager {
+            constructor(container) {
+                this.container = container;
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.cube = null;
+                this.isDragging = false;
+                this.previousMousePosition = { x: 0, y: 0 };
+                this.animateId = null;
+                this.isInitialized = false;
+
+                this.CUBE_COLORS = {
+                    'U': 0xFFFF00, // Amarelo (Top)
+                    'D': 0xFFFFFF, // Branco (Bottom)
+                    'L': 0xFFA500, // Laranja (Left)
+                    'R': 0xFF0000, // Vermelho (Right)
+                    'F': 0x00FF00, // Verde (Front)
+                    'B': 0x0000FF, // Azul (Back)
+                    'I': 0x111111  // Preto (Interior/Base)
+                };
+
+                this.init();
+            }
+
+            init() {
+                // 1. Cena
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x222222);
+
+                // 2. Câmera
+                const aspect = this.container.clientWidth / this.container.clientHeight;
+                this.camera = new THREE.PerspectiveCamera(70, aspect, 0.1, 1000);
+                this.camera.position.set(0, 0, 8);
+                this.scene.add(this.camera);
+
+                // 3. Renderizador
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.container.appendChild(this.renderer.domElement);
+
+                // 4. Luzes
+                const ambientLight = new THREE.AmbientLight(0x404040, 5); // Luz suave
+                this.scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                directionalLight.position.set(5, 5, 5).normalize();
+                this.scene.add(directionalLight);
+
+                // 5. Criação do Cubo
+                this.createCube();
+
+                // 6. Adiciona Event Listeners para rotação customizada
+                this.addEventListeners();
+
+                this.isInitialized = true;
+                this.resize();
+            }
+
+            /**
+             * Cria o modelo 3D do Cubo de Rubik 3x3x3 como 27 cubos individuais (cubelets).
+             * A cor é aplicada a cada face visível.
+             */
+            createCube() {
+                if (this.cube) {
+                    this.scene.remove(this.cube);
+                    this.cube = null;
+                }
+                this.cube = new THREE.Group();
+                const CUBELET_SIZE = 1.0;
+                const GAP = 0.1;
+                const SPACING = CUBELET_SIZE + GAP;
+
+                for (let x = -1; x <= 1; x++) {
+                    for (let y = -1; y <= 1; y++) {
+                        for (let z = -1; z <= 1; z++) {
+                            // Cria a geometria e o material para um cubelet
+                            const geometry = new THREE.BoxGeometry(CUBELET_SIZE, CUBELET_SIZE, CUBELET_SIZE);
+
+                            // Cores padrão (Ordem: R, L, U, D, F, B)
+                            const colors = [
+                                (x === 1) ? this.CUBE_COLORS.R : this.CUBE_COLORS.I, // R (Right, +X)
+                                (x === -1) ? this.CUBE_COLORS.L : this.CUBE_COLORS.I, // L (Left, -X)
+                                (y === 1) ? this.CUBE_COLORS.U : this.CUBE_COLORS.I, // U (Up, +Y)
+                                (y === -1) ? this.CUBE_COLORS.D : this.CUBE_COLORS.I, // D (Down, -Y)
+                                (z === 1) ? this.CUBE_COLORS.F : this.CUBE_COLORS.I, // F (Front, +Z)
+                                (z === -1) ? this.CUBE_COLORS.B : this.CUBE_COLORS.I  // B (Back, -Z)
+                            ];
+
+                            const materials = colors.map(color =>
+                                new THREE.MeshLambertMaterial({ color: color })
+                            );
+
+                            const cubelet = new THREE.Mesh(geometry, materials);
+                            cubelet.position.set(x * SPACING, y * SPACING, z * SPACING);
+                            this.cube.add(cubelet);
+                        }
+                    }
+                }
+
+                // Aplica uma rotação inicial para melhor visualização
+                this.cube.rotation.x = Math.PI / 8;
+                this.cube.rotation.y = Math.PI / 4;
+                this.scene.add(this.cube);
+            }
+
+            /**
+             * Redimensiona o renderizador e a câmara quando a janela muda de tamanho.
+             */
+            resize() {
+                if (!this.isInitialized || !this.container.parentElement) return;
+
+                // Pega o tamanho do container pai (que é o #cube-view)
+                const parentRect = this.container.parentElement.getBoundingClientRect();
+                const size = Math.min(parentRect.width, parentRect.height);
+
+                // Define o tamanho do container 3D para um quadrado dentro do espaço disponível
+                this.container.style.width = `${size}px`;
+                this.container.style.height = `${size}px`;
+
+                const width = size;
+                const height = size;
+
+                this.renderer.setSize(width, height);
+                this.camera.aspect = width / height;
+                this.camera.updateProjectionMatrix();
+                this.render();
+            }
+
+            /**
+             * Aplica o embaralhamento visualmente (Simplificado: Apenas rotaciona o cubo principal)
+             */
+            applyScramble(scrambleText) {
+                if (!this.cube) return;
+
+                // Redefine e aplica uma rotação aleatória baseada no scramble
+                const hash = scrambleText.length > 0 ? scrambleText.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : 0;
+
+                this.cube.rotation.x = (Math.PI / 8) + (hash % 10) * 0.05;
+                this.cube.rotation.y = (Math.PI / 4) + (hash % 7) * 0.05;
+                this.cube.rotation.z = 0;
+
+                this.render();
+            }
+
+            /**
+             * Adiciona listeners para rotação manual (mouse/touch)
+             */
+            addEventListeners() {
+                // Mouse Events
+                this.container.addEventListener('mousedown', (e) => this.onMouseDown(e));
+                this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
+                document.addEventListener('mouseup', () => this.onMouseUp());
+
+                // Touch Events
+                this.container.addEventListener('touchstart', (e) => this.onTouchStart(e));
+                this.container.addEventListener('touchmove', (e) => this.onTouchMove(e));
+                document.addEventListener('touchend', () => this.onMouseUp());
+            }
+
+            onMouseDown(e) {
+                this.isDragging = true;
+                this.previousMousePosition.x = e.clientX;
+                this.previousMousePosition.y = e.clientY;
+            }
+
+            onMouseMove(e) {
+                if (!this.isDragging || !this.cube) return;
+
+                const deltaX = e.clientX - this.previousMousePosition.x;
+                const deltaY = e.clientY - this.previousMousePosition.y;
+
+                this.cube.rotation.y += deltaX * 0.01;
+                this.cube.rotation.x += deltaY * 0.01;
+
+                this.previousMousePosition.x = e.clientX;
+                this.previousMousePosition.y = e.clientY;
+
+                this.render();
+            }
+
+            onMouseUp() {
+                this.isDragging = false;
+            }
+
+            onTouchStart(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                this.onMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
+            }
+
+            onTouchMove(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                this.onMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
+            }
+
+
+            /**
+             * Renderiza a cena
+             */
+            render() {
+                if (this.renderer) {
+                    this.renderer.render(this.scene, this.camera);
+                }
+            }
+        }
 
         // --- Funções Auxiliares de Áudio TTS ---
 
@@ -252,20 +515,17 @@
                     });
 
                     if (!response.ok) {
-                        // Se for um erro de autenticação/permissão, não vale a pena tentar novamente.
                         if (response.status === 401 || response.status === 403) {
                             console.error(`TTS API retornou erro de status: ${response.status}. Chave de API ou problema de permissões. Retentar não ajudará.`);
                             currentRetry = MAX_RETRIES;
                             break;
                         }
 
-                        // Para outros erros (ex: 500, 429), tenta retentar
                         console.warn(`TTS API retornou erro de status: ${response.status}. Retentando... (${currentRetry + 1}/${MAX_RETRIES})`);
                         currentRetry++;
-                        // Implementa o atraso de backoff exponencial
                         const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        continue; // Recomeça o loop
+                        continue;
                     }
 
                     const result = await response.json();
@@ -274,7 +534,6 @@
                     const mimeType = part?.inlineData?.mimeType;
 
                     if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
-                        // Extrai a taxa de amostragem
                         const sampleRateMatch = mimeType.match(/rate=(\d+)/);
                         if (!sampleRateMatch) throw new Error("Não foi possível analisar a taxa de amostragem do mimeType.");
                         const sampleRate = parseInt(sampleRateMatch[1], 10);
@@ -287,10 +546,10 @@
 
                         ttsAudio.src = audioUrl;
                         ttsAudio.play();
-                        return; // Sucesso, sai da função
+                        return;
                     } else {
                         console.error("Dados de áudio TTS ausentes ou formato inesperado.", result);
-                        return; // Falha, sai da função
+                        return;
                     }
 
                 } catch (error) {
@@ -300,7 +559,6 @@
                         console.error("Falha persistente na chamada à API TTS após retentativas.");
                         return;
                     }
-                    // Implementa o atraso de backoff exponencial
                     const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
@@ -352,9 +610,9 @@
                 const finalTime = Date.now() - startTime;
                 currentState = STATUS.STOPPED;
                 timerArea.classList.remove('timer-status-timing');
-                timerArea.classList.remove('timer-status-ready'); // Clean up any lingering ready state
-                timerDisplay.classList.remove('text-red-500'); // Remove red from timer
-                timerDisplay.classList.add('text-gray-800'); // Default color
+                timerArea.classList.remove('timer-status-ready');
+                timerDisplay.classList.remove('text-red-500');
+                timerDisplay.classList.add('text-gray-800');
 
                 // Salva o tempo no Firestore e gera novo embaralhamento
                 saveSolveTime(finalTime);
@@ -363,7 +621,7 @@
 
                 // Fala o tempo final
                 const seconds = (finalTime / 1000).toFixed(2);
-                speakTime(`O seu tempo foi de ${seconds} segundos.`);
+                // speakTime(`O seu tempo foi de ${seconds} segundos.`);
             }
         }
 
@@ -391,24 +649,29 @@
                 lastMove = move;
                 lastAxis = moveAxis;
             }
-            scrambleDisplay.textContent = scramble.join(' ');
+            currentScramble = scramble.join(' ');
+            scrambleDisplay.textContent = currentScramble;
+            if (cubeManager) {
+                cubeManager.applyScramble(currentScramble);
+            }
         }
 
 
         // --- Lógica de Eventos de Teclado (Barra de Espaço) ---
 
         document.addEventListener('keydown', (e) => {
+            if (is3DView) return; // Desativa cronómetro na vista 3D
+
             if (e.code === 'Space' && !isSpaceDown) {
-                e.preventDefault(); // Previne a rolagem
+                e.preventDefault();
                 isSpaceDown = true;
 
                 if (currentState === STATUS.STOPPED) {
-                    // Começa a contagem para o estado READY_TO_START
-                    timerDisplay.classList.add('text-gray-500'); // Cor de espera suave
+                    timerDisplay.classList.add('text-gray-500');
                     holdTimeout = setTimeout(() => {
                         currentState = STATUS.READY_TO_START;
                         timerDisplay.classList.remove('text-gray-500');
-                        timerArea.classList.add('timer-status-ready'); // Cor de pronto (vermelho)
+                        timerArea.classList.add('timer-status-ready');
                         timerMessage.textContent = 'Solte a barra de espaço para cronometrar!';
                     }, HOLD_TIME_MS);
                 }
@@ -416,28 +679,90 @@
         });
 
         document.addEventListener('keyup', (e) => {
+            if (is3DView) return; // Desativa cronómetro na vista 3D
+
             if (e.code === 'Space') {
                 isSpaceDown = false;
 
                 if (currentState === STATUS.READY_TO_START) {
-                    // Soltou depois do hold: Inicia o cronômetro
                     clearTimeout(holdTimeout);
                     startTiming();
                 } else if (currentState === STATUS.TIMING) {
-                    // Soltou durante a cronometragem: Para o cronômetro
                     stopTiming();
                 } else if (currentState === STATUS.STOPPED) {
-                    // Soltou sem hold ou após uma paragem: Limpa o timeout de hold (caso tenha sido rápido)
                     clearTimeout(holdTimeout);
                     timerDisplay.classList.remove('text-gray-500');
                 }
             }
         });
 
+        // --- Lógica de Alternar Vista com Animação ---
+
+        function toggleView() {
+            const transitionDuration = 300; // Deve corresponder à duração da transição CSS
+            const currentView = is3DView ? cubeView : timerMain;
+            const nextView = is3DView ? timerMain : cubeView;
+
+            // 1. Aplica animação de fade-out (saída) à vista atual
+            currentView.classList.add('fade-out');
+            currentView.classList.remove('fade-in');
+
+            // 2. Espera a animação de saída terminar
+            setTimeout(() => {
+
+                // 3. Oculta a vista atual
+                currentView.classList.add('hidden');
+
+                // 4. Atualiza o estado e o texto do botão
+                is3DView = !is3DView;
+                toggleViewBtn.textContent = is3DView ? 'Cronómetro' : 'Cubo 3D';
+
+                // 5. Prepara e mostra a próxima vista
+
+                // Garante que a próxima vista está no estado fade-out antes de ser mostrada
+                nextView.classList.remove('fade-in');
+                nextView.classList.add('fade-out');
+
+                // Torna a próxima vista visível
+                nextView.classList.remove('hidden');
+
+                if (is3DView) {
+                    // Se for a vista 3D, garante que está inicializada e redimensionada
+                    if (!cubeManager) {
+                        cubeManager = new Cube3DManager(cubeCanvasContainer);
+                    }
+                    cubeManager.resize();
+                    cubeManager.applyScramble(currentScramble);
+                } else {
+                    // --- Garantia de Retorno ao Estado Padrão (STOPPED) do Cronômetro ---
+                    // Este bloco garante que, ao retornar à vista do cronômetro,
+                    // ele esteja visual e funcionalmente no estado "pronto para iniciar".
+                    currentState = STATUS.STOPPED;
+                    timerArea.classList.remove('timer-status-ready', 'timer-status-timing');
+                    timerDisplay.classList.remove('text-gray-500');
+                    timerMessage.textContent = 'Mantenha a barra de espaço pressionada para iniciar';
+                    // ---------------------------------------------------------------------
+                }
+
+                // Força um reflow
+                void nextView.offsetWidth;
+
+                // 6. Aplica animação de fade-in (entrada)
+                nextView.classList.remove('fade-out');
+                nextView.classList.add('fade-in');
+
+            }, transitionDuration);
+        }
+
+        toggleViewBtn.addEventListener('click', toggleView);
+        window.addEventListener('resize', () => {
+            if (cubeManager) cubeManager.resize();
+        });
+
+
         // --- Lógica do Firebase Firestore ---
 
         function getCollectionPath(uid) {
-            // Caminho privado: /artifacts/{appId}/users/{userId}/solves
             return `artifacts/${appId}/users/${uid}/solves`;
         }
 
@@ -451,12 +776,11 @@
             }
 
             try {
-                setLogLevel('error'); // Reduz a verbosidade do log do Firestore
+                setLogLevel('error');
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
 
-                // Tenta autenticação com token ou anónima
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
@@ -493,7 +817,7 @@
             try {
                 const docRef = await addDoc(collection(db, getCollectionPath(userId)), {
                     time: timeMs,
-                    scramble: scrambleDisplay.textContent,
+                    scramble: currentScramble,
                     timestamp: serverTimestamp()
                 });
                 console.log("Tempo salvo com ID:", docRef.id);
@@ -507,14 +831,13 @@
             if (!isAuthReady || !userId || !db) return;
 
             const solvesRef = collection(db, getCollectionPath(userId));
-            const q = query(solvesRef); // Pode adicionar orderBy, mas evitamos para não exigir índice
+            const q = query(solvesRef);
 
             onSnapshot(q, (snapshot) => {
                 let solves = [];
                 snapshot.forEach((doc) => {
                     solves.push({ id: doc.id, ...doc.data() });
                 });
-                // Ordena localmente por timestamp decrescente
                 solves.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
 
                 updateUIWithSolves(solves);
@@ -527,7 +850,6 @@
         async function deleteSolve(id) {
             if (!isAuthReady || !userId || !db) return;
 
-            // Usa prompt personalizado para evitar o alert/confirm do navegador
             const userConfirmed = window.prompt("Confirme a exclusão do tempo (digite 'deletar'):");
             if (userConfirmed !== 'deletar') return;
 
@@ -548,14 +870,11 @@
                 return { best: '--', ao5: '--', total: 0 };
             }
 
-            // Melhor Tempo
             const bestTime = Math.min(...times);
 
-            // Média de 5 (Ao5) - usa as últimas 5 soluções
             let ao5 = '--';
-            const lastFive = times.slice(0, 5); // Como estão ordenados por tempo, pegamos os 5 primeiros
+            const lastFive = times.slice(0, 5);
             if (lastFive.length === 5) {
-                // Remove o melhor e o pior, calcula a média dos 3 restantes
                 const sortedFive = [...lastFive].sort((a, b) => a - b);
                 const sum = sortedFive.slice(1, 4).reduce((acc, val) => acc + val, 0);
                 ao5 = formatTime(Math.round(sum / 3));
@@ -593,7 +912,6 @@
                 solvesList.appendChild(solveEl);
             });
 
-            // Adiciona listener para exclusão
             solvesList.querySelectorAll('.delete-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
@@ -608,7 +926,10 @@
         window.onload = () => {
             initFirebase();
             generateScramble();
-            timerDisplay.textContent = '0.000'; // Define o estado inicial do display
+            timerDisplay.textContent = '0.000';
+
+            // Garante que o cubo 3D está no estado inicial de fade-out
+            cubeView.classList.add('fade-out');
         };
 
     </script>
