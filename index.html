@@ -223,6 +223,7 @@
                 this.animateId = null;
                 this.isInitialized = false;
 
+                // CORREÇÃO: Adicionada a constante 'I' (Interior/Preto) que estava a faltar.
                 this.CUBE_COLORS = {
                     'U': 0xFFFF00, // Amarelo (Top)
                     'D': 0xFFFFFF, // Branco (Bottom)
@@ -230,24 +231,24 @@
                     'R': 0xFF0000, // Vermelho (Right)
                     'F': 0x00FF00, // Verde (Front)
                     'B': 0x0000FF, // Azul (Back)
-                    'I': 0x111111  // Preto (Interior/Base)
+                    'I': 0x000000, // Interior/Face Não Visível (Preto)
                 };
 
                 this.init();
             }
 
             init() {
-                // 1. Cena
+                // 1. Cena (Substitui this.scene = null)
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x222222);
 
-                // 2. Câmera
+                // 2. Câmera (Substitui this.camera = null)
                 const aspect = this.container.clientWidth / this.container.clientHeight;
                 this.camera = new THREE.PerspectiveCamera(70, aspect, 0.1, 1000);
                 this.camera.position.set(0, 0, 8);
                 this.scene.add(this.camera);
 
-                // 3. Renderizador
+                // 3. Renderizador (Substitui this.renderer = null)
                 this.renderer = new THREE.WebGLRenderer({ antialias: true });
                 this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
                 this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -260,7 +261,7 @@
                 directionalLight.position.set(5, 5, 5).normalize();
                 this.scene.add(directionalLight);
 
-                // 5. Criação do Cubo
+                // 5. Criação do Cubo (Substitui this.cube = null)
                 this.createCube();
 
                 // 6. Adiciona Event Listeners para rotação customizada
@@ -277,7 +278,7 @@
             createCube() {
                 if (this.cube) {
                     this.scene.remove(this.cube);
-                    this.cube = null;
+                    this.cube = null; // Limpa a referência após a remoção da cena.
                 }
                 this.cube = new THREE.Group();
                 const CUBELET_SIZE = 1.0;
@@ -621,7 +622,7 @@
 
                 // Fala o tempo final
                 const seconds = (finalTime / 1000).toFixed(2);
-                // speakTime(`O seu tempo foi de ${seconds} segundos.`);
+                speakTime(`O seu tempo foi de ${seconds} segundos.`);
             }
         }
 
